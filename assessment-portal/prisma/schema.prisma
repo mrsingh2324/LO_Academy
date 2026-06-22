@@ -1,15 +1,13 @@
-// Assessment Portal — data model (PRD §5).
-// SQLite for the one-day build; schema kept Postgres-portable.
-// NOTE: SQLite has no native enums, so enum-typed columns are `String`
-// and constrained at the application layer (src/lib/enums.ts + zod).
-// `Json` maps to TEXT on SQLite and to jsonb on Postgres.
+// Assessment Portal — data model (PRD §5). PostgreSQL (Vercel Postgres).
+// NOTE: enum-typed columns are `String`, constrained at the application layer
+// (src/lib/enums.ts + zod) so the app stays portable. `Json` maps to jsonb.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

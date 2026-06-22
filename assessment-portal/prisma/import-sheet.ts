@@ -58,6 +58,8 @@ async function main() {
   await prisma.report.deleteMany();
   await prisma.prepArtifact.deleteMany();
   await prisma.panelFeedback.deleteMany();
+  await prisma.studentQuery.deleteMany(); // FK → student (Postgres enforces order)
+  await prisma.reconciliationItem.deleteMany();
   await prisma.stageAttempt.deleteMany();
   await prisma.student.deleteMany();
   await prisma.bucket.deleteMany();
