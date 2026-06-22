@@ -6,35 +6,45 @@ import { stageOptionsForBucket, STAGE_LABELS } from "@/lib/enums";
 export default function RosterFilters({
   buckets,
   yogs,
+  sizes,
   q,
   stage,
   bucket,
   yog,
+  size,
 }: {
   buckets: { name: string }[];
   yogs: number[];
+  sizes: number[];
   q?: string;
   stage?: string;
   bucket?: string;
   yog?: string;
+  size?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(q ?? "");
   const [bucketSel, setBucketSel] = useState(bucket ?? "");
   const [stageSel, setStageSel] = useState(stage ?? "");
   const [yogSel, setYogSel] = useState(yog ?? "");
+  const [sizeSel, setSizeSel] = useState(size ?? "20");
 
   // Stage options cascade from the selected bucket (A→Nxtmock/TR1/TR2, B→Dev test/TR1/TR2, C→TR1, D→Not qualified).
   const stageOpts = stageOptionsForBucket(bucketSel || null);
 
-  function submit(e?: React.FormEvent) {
-    e?.preventDefault();
+  function go(override: { size?: string } = {}) {
     const params = new URLSearchParams();
     if (query.trim()) params.set("q", query.trim());
     if (stageSel) params.set("stage", stageSel);
     if (bucketSel) params.set("bucket", bucketSel);
     if (yogSel) params.set("yog", yogSel);
+    const sz = override.size ?? sizeSel;
+    if (sz && sz !== "20") params.set("size", sz);
     router.push(`/org/roster${params.toString() ? `?${params}` : ""}`);
+  }
+  function submit(e?: React.FormEvent) {
+    e?.preventDefault();
+    go();
   }
 
   return (
@@ -87,6 +97,23 @@ export default function RosterFilters({
         ))}
       </select>
       <button className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700">Filter</button>
+      <span className="ml-1 flex items-center gap-1 text-sm text-zinc-500">
+        Show
+        <select
+          value={sizeSel}
+          onChange={(e) => {
+            setSizeSel(e.target.value);
+            go({ size: e.target.value });
+          }}
+          className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm"
+        >
+          {sizes.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </span>
       <button
         type="button"
         onClick={() => {
@@ -94,6 +121,7 @@ export default function RosterFilters({
           setBucketSel("");
           setStageSel("");
           setYogSel("");
+          setSizeSel("20");
           router.push("/org/roster");
         }}
         className="text-sm text-zinc-500 hover:underline"

@@ -21,7 +21,7 @@ function nextStep(stage: string, status: string): { label: string; tone: string 
 export default async function Roster({
   searchParams,
 }: {
-  searchParams: Promise<{ stage?: string; bucket?: string; q?: string; yog?: string; page?: string }>;
+  searchParams: Promise<{ stage?: string; bucket?: string; q?: string; yog?: string; page?: string; size?: string }>;
 }) {
   const sp = await searchParams;
   const where: Prisma.StudentWhereInput = { deletedAt: null };
@@ -30,7 +30,8 @@ export default async function Roster({
   if (sp.yog && /^\d{4}$/.test(sp.yog)) where.yearOfGraduation = Number(sp.yog);
   if (sp.q) where.OR = [{ name: { contains: sp.q } }, { email: { contains: sp.q } }, { externalRef: { contains: sp.q } }];
 
-  const PAGE_SIZE = 50;
+  const PAGE_SIZES = [20, 50, 100, 200];
+  const PAGE_SIZE = PAGE_SIZES.includes(Number(sp.size)) ? Number(sp.size) : 20;
   const page = Math.max(1, Number(sp.page ?? "1") || 1);
 
   const [students, buckets, total, yogRows] = await Promise.all([
@@ -58,6 +59,7 @@ export default async function Roster({
     if (sp.stage) u.set("stage", sp.stage);
     if (sp.bucket) u.set("bucket", sp.bucket);
     if (sp.yog) u.set("yog", sp.yog);
+    if (sp.size) u.set("size", sp.size);
     u.set("page", String(p));
     return `/org/roster?${u.toString()}`;
   };
@@ -75,7 +77,7 @@ export default async function Roster({
 
       <AiQueryBox />
 
-      <RosterFilters buckets={buckets.map((b) => ({ name: b.name }))} yogs={yogs} q={sp.q} stage={sp.stage} bucket={sp.bucket} yog={sp.yog} />
+      <RosterFilters buckets={buckets.map((b) => ({ name: b.name }))} yogs={yogs} sizes={PAGE_SIZES} q={sp.q} stage={sp.stage} bucket={sp.bucket} yog={sp.yog} size={String(PAGE_SIZE)} />
 
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <table className="w-full text-sm">
