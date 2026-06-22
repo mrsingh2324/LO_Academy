@@ -1,0 +1,242 @@
+// Assessment Portal — data model (PRD §5).
+// SQLite for the one-day build; schema kept Postgres-portable.
+// NOTE: SQLite has no native enums, so enum-typed columns are `String`
+// and constrained at the application layer (src/lib/enums.ts + zod).
+// `Json` maps to TEXT on SQLite and to jsonb on Postgres.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Bucket {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  students    Student[]
+}
+
+model Student {
+  id                       String    @id @default(uuid())
+  externalRef              String    @unique // idempotency anchor from intake
+  name                     String
+  email                    String
+  phone                    String?
+  resumeUrl                String?   // candidate resume link from intake/round sheets
+  yearOfGraduation         Int?      // YOG from intake sheet
+  bucketId                 String?
+  bucket                   Bucket?   @relation(fields: [bucketId], references: [id])
+  offlineClearedAt         DateTime?
+  anomalousFlow            Boolean   @default(false) // switched buckets / non-standard journey
+  switchedFromBucket       String?   // original bucket before switching
+  flowNote                 String?   // explanation of the anomalous flow
+  currentStage             String    @default("react") // react|tr1|tr2|selected|rejected
+  currentStatus            String    @default("availability_requested")
+  currentAttemptId         String?
+  finalPortalRedirectedAt  DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  deletedAt                DateTime?
+
+  attempts     StageAttempt[]
+  reports      Report[]
+  messages     Message[]
+  queries      StudentQuery[]
+}
+
+model StageAttempt {
+  id                   String    @id @default(uuid())
+  studentId            String
+  student              Student   @relation(fields: [studentId], references: [id])
+  stage                String    // react|tr1|tr2
+  attemptNumber        Int       @default(1)
+  status               String    @default("availability_requested")
+  availabilityOptions  Json?     // offered fixed weekend slots
+  chosenSlot           DateTime?
+  scheduledAt          DateTime?
+  calendarEventId      String?
+  availabilitySheetRef String?
+  scoreSheetRef        String?
+  submittedAt          DateTime? // react only
+  attendedAt           DateTime? // tr only
+  score                Float?
+  result               String    @default("pending") // pending|pass|fail
+  outcome              String?    // raw outcome label from source sheet (Cleared, Strong Hire, Shortlisted, Rejected…)
+  details              Json?      // full structured round data + raw source row (lossless)
+  remarks              String?
+  evaluatorId          String?
+  evaluator            User?     @relation("Evaluator", fields: [evaluatorId], references: [id])
+  prepDueUntil         DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  panelFeedback PanelFeedback[]
+  reports       Report[]
+  prepArtifacts PrepArtifact[]
+  messages      Message[]
+
+  @@unique([studentId, stage, attemptNumber])
+}
+
+model PanelFeedback {
+  id             String   @id @default(uuid())
+  attemptId      String
+  attempt        StageAttempt @relation(fields: [attemptId], references: [id])
+  panelistId     String
+  panelist       User     @relation("Panelist", fields: [panelistId], references: [id])
+  scores         Json     // per-competency
+  strengths      String?
+  weaknesses     String?
+  recommendation String   // advance|reject|borderline
+  submittedAt    DateTime @default(now())
+}
+
+model Report {
+  id            String   @id @default(uuid())
+  attemptId     String
+  attempt       StageAttempt @relation(fields: [attemptId], references: [id])
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id])
+  stage         String   // tr1|tr2
+  sourceData    Json     // snapshot passed to the model — reproducibility
+  promptVersion String
+  content       String   // markdown
+  model         String
+  generatedById String?
+  generatedBy   User?    @relation("ReportAuthor", fields: [generatedById], references: [id])
+  status        String   @default("generated") // generated|reviewed|shared
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model PrepArtifact {
+  id          String    @id @default(uuid())
+  attemptId   String
+  attempt     StageAttempt @relation(fields: [attemptId], references: [id])
+  type        String    // react_guideline|tr_prep|pass_forward_prep
+  topics      Json?
+  resources   Json?
+  body        String?
+  reopenAt    DateTime?
+  generatedAt DateTime  @default(now())
+}
+
+model ScheduledJob {
+  id          String    @id @default(uuid())
+  attemptId   String?
+  type        String    // send_availability|fixed_slot_send|send_reminder|reopen_attempt|escalate_no_response|redirect_final
+  runAt       DateTime
+  status      String    @default("pending") // pending|done|skipped|failed
+  attempts    Int       @default(0)
+  payload     Json?
+  executedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Message {
+  id                String   @id @default(uuid())
+  studentId         String
+  student           Student  @relation(fields: [studentId], references: [id])
+  attemptId         String?
+  attempt           StageAttempt? @relation(fields: [attemptId], references: [id])
+  channel           String   // email|sms|whatsapp
+  templateKey       String
+  payload           Json?
+  status            String   @default("queued") // queued|sent|delivered|failed
+  providerMessageId String?
+  sentAt            DateTime?
+  createdAt         DateTime @default(now())
+
+  @@unique([attemptId, templateKey]) // idempotency per (attempt, template)
+}
+
+model AiQueryLog {
+  id              String   @id @default(uuid())
+  actorId         String?
+  question        String
+  generatedFilter Json?
+  resultCount     Int      @default(0)
+  status          String   @default("ok") // ok|rejected|error
+  executedAt      DateTime @default(now())
+}
+
+model SheetSyncLog {
+  id             String   @id @default(uuid())
+  sheet          String   // availability|scores
+  direction      String   // in|out
+  rowRef         String
+  mappedAttemptId String?
+  payload        Json?
+  status         String   @default("ok")
+  syncedAt       DateTime @default(now())
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  role      String   // admin|ops|evaluator|panelist
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  evaluatedAttempts StageAttempt[]  @relation("Evaluator")
+  panelFeedback     PanelFeedback[] @relation("Panelist")
+  reports           Report[]        @relation("ReportAuthor")
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// Candidate-raised queries to the assessments/ops team (student → portal inbox).
+model StudentQuery {
+  id           String    @id @default(uuid())
+  studentId    String
+  student      Student   @relation(fields: [studentId], references: [id])
+  subject      String?
+  message      String
+  status       String    @default("open") // open | answered
+  response     String?
+  respondedById String?
+  respondedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+}
+
+// Running list of data-import mismatches to reconcile (per user request).
+model ReconciliationItem {
+  id        String   @id @default(uuid())
+  source    String   // nxtmock|tr1|tr2|…  (which sheet)
+  bucket    String?  // bucket the sheet covers
+  kind      String   // unmatched_uid | cross_bucket | count_note
+  uid       String?  // candidate UID where applicable
+  name      String?
+  detail    Json?
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([source])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  entity    String
+  entityId  String
+  actorId   String?
+  action    String
+  before    Json?
+  after     Json?
+  at        DateTime @default(now())
+}

@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# next.js build output
+.next/
+out/
+build/
+next-env.d.ts
+
+# environment / secrets
+.env
+.env*.local
+
+# database (regenerable via `prisma migrate dev` + the import scripts)
+*.db
+*.db-journal
+
+# local tooling / editor
+.claude/
+.DS_Store
+*.log
+.vscode/
+npm-debug.log*
