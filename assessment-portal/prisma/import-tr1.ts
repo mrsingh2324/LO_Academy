@@ -74,8 +74,8 @@ async function main() {
       await prisma.stageAttempt.update({ where: { id: nxt.id }, data: { result: "pass", status: "passed", outcome: nxt.outcome ?? "Cleared" } });
     }
 
-    // rebuild tr1/tr2 attempts (idempotent)
-    const old = student.attempts.filter((a) => a.stage === "tr1" || a.stage === "tr2").map((a) => a.id);
+    // rebuild only tr1 attempts (idempotent) — never touch tr2 (owned by import-tr2)
+    const old = student.attempts.filter((a) => a.stage === "tr1").map((a) => a.id);
     if (old.length) {
       await prisma.message.deleteMany({ where: { attemptId: { in: old } } });
       await prisma.scheduledJob.deleteMany({ where: { attemptId: { in: old } } });
@@ -114,13 +114,15 @@ async function main() {
     const moved = typeof latest.movedToTr2 === "string" && latest.movedToTr2.toLowerCase().includes("moved");
 
     if (latest.result === "pass" && moved) {
-      // advanced to TR2 (awaiting scheduling) — TR2 detail not imported yet
-      const tr2 = await prisma.stageAttempt.create({
+      // advanced to TR2 — reuse an existing tr2 attempt (with imported results) if present,
+      // otherwise create a placeholder awaiting scheduling. Never overwrite TR2 data.
+      const existingTr2 = await prisma.stageAttempt.findFirst({ where: { studentId: student.id, stage: "tr2" }, orderBy: { attemptNumber: "desc" } });
+      const tr2 = existingTr2 ?? await prisma.stageAttempt.create({
         data: { studentId: student.id, stage: "tr2", attemptNumber: 1, status: "availability_requested" },
       });
       await prisma.student.update({
         where: { id: student.id },
-        data: { currentStage: "tr2", currentStatus: "availability_requested", currentAttemptId: tr2.id },
+        data: { currentStage: "tr2", currentStatus: tr2.status, currentAttemptId: tr2.id },
       });
       movedToTr2++;
     } else {

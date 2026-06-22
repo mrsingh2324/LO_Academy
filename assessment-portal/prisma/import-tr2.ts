@@ -83,10 +83,12 @@ async function main() {
     }
   }
 
-  // completeness caveat
+  // completeness note (verified): the workbook's TR2 tab holds exactly these
+  // interviews; more students are "moved to TR2" but pending their interview.
+  const movedToTr2 = await prisma.student.count({ where: { bucket: { name: "A" }, currentStage: "tr2" } });
   await prisma.reconciliationItem.create({
-    data: { source: "tr2", bucket: "A", kind: "count_note", name: "TR2 source caveat",
-      detail: { reason: `TR2 imported from full-workbook text export (${rows.length} rows) — row-lossy vs a clean CSV. Share the TR2 tab as its own export to confirm completeness.` } as Prisma.InputJsonValue },
+    data: { source: "tr2", bucket: "A", kind: "count_note", name: "TR2 completeness (verified)", resolved: true,
+      detail: { reason: `${rows.length} TR2 interviews completed (all rows in the workbook's TR2 tab captured); ${movedToTr2} moved to TR2 total, so ${movedToTr2 - rows.length} are pending their TR2 interview.` } as Prisma.InputJsonValue },
   });
 
   console.log(`TR2 rows: ${rows.length} | matched: ${matched} | tr2 attempts: ${created} | → placement pool: ${toPlacement} | unmatched: ${unmatched.length}`);

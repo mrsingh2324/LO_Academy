@@ -17,25 +17,49 @@ type Row = {
 
 async function main() {
   const rows: Row[] = JSON.parse(readFileSync(JSON_PATH, "utf8"));
-  let matched = 0, contactsUpdated = 0, attemptsUpdated = 0;
-  const unmatched: string[] = [];
+  let matched = 0, contactsUpdated = 0, attemptsUpdated = 0, createdFromSheet = 0;
 
   // reset this source's reconciliation entries (idempotent)
   await prisma.reconciliationItem.deleteMany({ where: { source: "nxtmock" } });
+  const bucketA = await prisma.bucket.findFirst({ where: { name: "A" } });
 
   for (const r of rows) {
-    const student = await prisma.student.findUnique({
+    let student = await prisma.student.findUnique({
       where: { externalRef: r.ref },
       include: { attempts: { where: { stage: "nxtmock" }, orderBy: { attemptNumber: "asc" } } },
     });
     if (!student) {
-      unmatched.push(r.ref);
-      await prisma.reconciliationItem.create({
-        data: { source: "nxtmock", bucket: "A", kind: "unmatched_uid", uid: r.ref, name: r.name ?? undefined,
-          detail: { reason: "UID in nxtmock sheet but not in roster", cycle: r.cycle } as Prisma.InputJsonValue },
+      // Not in the master roster, but present in the Bucket-A nxtmock sheet →
+      // create them as a Bucket-A Nxtmock candidate (fixes the reconciliation).
+      const created = await prisma.student.create({
+        data: {
+          externalRef: r.ref,
+          name: r.name ?? "(unnamed)",
+          email: r.email ?? `${r.ref}@placeholder.invalid`,
+          phone: r.mobile ?? undefined,
+          yearOfGraduation: r.yog ?? undefined,
+          bucketId: bucketA?.id ?? null,
+          offlineClearedAt: new Date(),
+          currentStage: "nxtmock",
+          currentStatus: "availability_requested",
+          flowNote: "Added from Bucket A Nxtmock sheet (was not in the master roster).",
+        },
       });
-      continue;
+      const att = await prisma.stageAttempt.create({
+        data: { studentId: created.id, stage: "nxtmock", attemptNumber: 1, status: "availability_requested" },
+      });
+      await prisma.student.update({ where: { id: created.id }, data: { currentAttemptId: att.id } });
+      await prisma.reconciliationItem.create({
+        data: { source: "nxtmock", bucket: "A", kind: "created_from_sheet", uid: r.ref, name: r.name ?? undefined, resolved: true,
+          detail: { reason: "Created as Bucket A from Nxtmock sheet (absent from master roster)", cycle: r.cycle } as Prisma.InputJsonValue },
+      });
+      createdFromSheet++;
+      student = await prisma.student.findUnique({
+        where: { id: created.id },
+        include: { attempts: { where: { stage: "nxtmock" }, orderBy: { attemptNumber: "asc" } } },
+      });
     }
+    if (!student) continue;
     matched++;
 
     // backfill contacts (only overwrite synthetic/empty values)
@@ -73,8 +97,7 @@ async function main() {
 
   console.log(`nxtmock rows: ${rows.length}`);
   console.log(`matched students: ${matched} | contacts updated: ${contactsUpdated} | nxtmock attempts enriched: ${attemptsUpdated}`);
-  console.log(`unmatched UIDs (not in DB): ${unmatched.length}`);
-  if (unmatched.length) console.log("  sample:", unmatched.slice(0, 5).join(", "));
+  console.log(`created from sheet (were missing from roster): ${createdFromSheet}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());
